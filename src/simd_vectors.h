@@ -2,8 +2,7 @@
 #define TDOKU_SIMD_VECTORS_H
 
 #include <cstring>
-#include <wasm_simd128.h>
-#include <emmintrin.h>
+#include <immintrin.h>
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -68,9 +67,9 @@ struct FourBy64 {
 namespace {
 
 struct Consts {
-    v128_t popcount_mask4 = wasm_i16x8_splat(0x0f);
-    v128_t popcount_lookup = wasm_i8x16_make(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
-    v128_t rotate_rows1 = wasm_i8x16_make(2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12, 13, 14, 15, 8, 9);
+    __m128i popcount_mask4 = _mm_set1_epi16(0x0f);
+    __m128i popcount_lookup = _mm_setr_epi8(0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4);
+    __m128i rotate_rows1 = _mm_setr_epi8(2, 3, 4, 5, 6, 7, 0, 1, 10, 11, 12, 13, 14, 15, 8, 9);
 };
 
 const Consts consts{};
@@ -89,21 +88,21 @@ constexpr int OP_X_Y_xor_Z_or    = 0b10111110;
 } // namespace
 
 struct Bitvec08x16 {
-    v128_t vec;
+    __m128i vec;
 
     Bitvec08x16() : vec{} {}
 
     // non-explicit conversions intended
-    Bitvec08x16(const v128_t &m128i) noexcept : vec{m128i} {}
+    Bitvec08x16(const __m128i &m128i) noexcept : vec{m128i} {}
 
     Bitvec08x16(const Bitvec08x16 &other) noexcept : vec(other.vec) {}
 
     Bitvec08x16(uint16_t x00, uint16_t x01, uint16_t x02, uint16_t x03,
                 uint16_t x04, uint16_t x05, uint16_t x06, uint16_t x07) :
-            vec{wasm_i16x8_make(x00, x01, x02, x03, x04, x05, x06, x07)} {}
+            vec{_mm_setr_epi16(x00, x01, x02, x03, x04, x05, x06, x07)} {}
 
     static inline Bitvec08x16 All(uint16_t value) {
-        return wasm_i16x8_splat(value);
+        return _mm_set1_epi16(value);
     }
 
     static inline Bitvec08x16
@@ -124,7 +123,7 @@ struct Bitvec08x16 {
 #endif
     }
 
-    inline Bitvec08x16 &operator=(const v128_t &m128i) {
+    inline Bitvec08x16 &operator=(const __m128i &m128i) {
         vec = m128i;
         return *this;
     }
@@ -145,32 +144,32 @@ struct Bitvec08x16 {
 
     inline TwoBy64 As_2x64() const {
         TwoBy64 out{};
-        wasm_v128_store((v128_t *) &out, vec);
+        _mm_store_si128((__m128i *) &out, vec);
         return out;
     }
 
     inline Bitvec08x16 WhichEqual(const Bitvec08x16 &other) const {
-        return wasm_i16x8_eq(vec, other.vec);
+        return _mm_cmpeq_epi16(vec, other.vec);
     }
 
     inline Bitvec08x16 WhichNonZero() const {
-        return wasm_i16x8_gt(vec, wasm_i64x2_const(0,0));
+        return _mm_cmpgt_epi16(vec, _mm_setzero_si128());
     }
 
     inline bool AllZero() const {
 #ifdef __SSE4_1__
         return _mm_test_all_zeros(vec, vec) != 0;
 #else
-        return wasm_i8x16_bitmask(WhichEqual(wasm_i64x2_const(0,0)).vec) == 0xffff;
+        return _mm_movemask_epi8(WhichEqual(_mm_setzero_si128()).vec) == 0xffff;
 #endif
     }
 
     inline bool AnyZero() const {
 #if(defined __AVX512VL__ && defined __AVX512BW__)
-        return _mm_cmp_epi16_mask(vec, wasm_i64x2_const(0,0), _MM_CMPINT_EQ) != 0;
+        return _mm_cmp_epi16_mask(vec, _mm_setzero_si128(), _MM_CMPINT_EQ) != 0;
 #else
-        Bitvec08x16 which_equal_zero = WhichEqual(wasm_i64x2_const(0,0));
-        return wasm_i8x16_bitmask(which_equal_zero.vec) != 0;
+        Bitvec08x16 which_equal_zero = WhichEqual(_mm_setzero_si128());
+        return _mm_movemask_epi8(which_equal_zero.vec) != 0;
 #endif
     }
 
@@ -178,8 +177,8 @@ struct Bitvec08x16 {
 #if(defined __AVX512VL__ && defined __AVX512BW__)
         return _mm_cmp_epi16_mask(vec, other.vec, _MM_CMPINT_LT) != 0;
 #else
-        Bitvec08x16 which_less_than = wasm_i16x8_gt(other.vec, vec);
-        return wasm_i8x16_bitmask(which_less_than.vec) != 0;
+        Bitvec08x16 which_less_than = _mm_cmpgt_epi16(other.vec, vec);
+        return _mm_movemask_epi8(which_less_than.vec) != 0;
 #endif
     }
 
@@ -195,27 +194,27 @@ struct Bitvec08x16 {
 #ifdef __SSE4_1__
         return _mm_testc_si128(other.vec, vec);
 #else
-        return Bitvec08x16{wasm_v128_andnot(other.vec, vec)}.AllZero();
+        return Bitvec08x16{_mm_andnot_si128(other.vec, vec)}.AllZero();
 #endif
     }
 
     inline Bitvec08x16 GetLowBit() const {
 #ifdef __SSSE3__
-        return wasm_v128_and(vec, _mm_sign_epi16(vec, wasm_i16x8_splat(-1)));
+        return _mm_and_si128(vec, _mm_sign_epi16(vec, _mm_set1_epi16(-1)));
 #else
-        return wasm_v128_and(vec, wasm_i16x8_add(wasm_v128_xor(vec, wasm_i16x8_splat(-1)), wasm_i16x8_splat(1)));
+        return _mm_and_si128(vec, _mm_add_epi16(_mm_xor_si128(vec, _mm_set1_epi16(-1)), _mm_set1_epi16(1)));
 #endif
     }
 
     inline Bitvec08x16 ClearLowBit() const {
 #ifdef __SSE4_2__
-        v128_t cmp = _mm_cmpgt_epi64(vec, wasm_i64x2_const(0,0));
+        __m128i cmp = _mm_cmpgt_epi64(vec, _mm_setzero_si128());
 #else
-        v128_t cmp = wasm_i32x4_gt(vec, wasm_i64x2_const(0,0));
+        __m128i cmp = _mm_cmpgt_epi32(vec, _mm_setzero_si128());
         cmp = _mm_or_si128(cmp, _mm_shuffle_epi32(cmp, 0b10110001));
 #endif
-        v128_t one = wasm_v128_andnot(_mm_slli_si128(cmp, 1), _mm_srli_epi64(cmp, 63));
-        return wasm_v128_and(vec, _mm_sub_epi64(vec, one));
+        __m128i one = _mm_andnot_si128(_mm_slli_si128(cmp, 1), _mm_srli_epi64(cmp, 63));
+        return _mm_and_si128(vec, _mm_sub_epi64(vec, one));
     }
 
     // counts the number of bits set among the 9 lowest order bits of each packed 16-bit integer
@@ -227,32 +226,32 @@ struct Bitvec08x16 {
                 *this & consts.popcount_mask4);
         Bitvec08x16 sum_4_7 = Bitvec08x16{consts.popcount_lookup}.Shuffle(
                 _mm_srli_epi16(vec, 4));
-        Bitvec08x16 sum_0_7 = wasm_i16x8_add(sum_0_3.vec, sum_4_7.vec);
-        Bitvec08x16 result = wasm_i16x8_add(sum_0_7.vec, _mm_srli_epi16(vec, 8));
+        Bitvec08x16 sum_0_7 = _mm_add_epi16(sum_0_3.vec, sum_4_7.vec);
+        Bitvec08x16 result = _mm_add_epi16(sum_0_7.vec, _mm_srli_epi16(vec, 8));
         return result;
 #else
         // SSE2 version following https://www.hackersdelight.org/hdcodetxt/pop.c.txt
-        v128_t mask1 = _mm_set1_epi8(0x77);
-        v128_t mask2 = _mm_set1_epi8(0x0f);
-        v128_t mask3 = wasm_i16x8_splat(0xff);
-        v128_t x = vec;
-        v128_t n = wasm_v128_and(mask1, _mm_srli_epi64(x, 1));
+        __m128i mask1 = _mm_set1_epi8(0x77);
+        __m128i mask2 = _mm_set1_epi8(0x0f);
+        __m128i mask3 = _mm_set1_epi16(0xff);
+        __m128i x = vec;
+        __m128i n = _mm_and_si128(mask1, _mm_srli_epi64(x, 1));
         x = _mm_sub_epi8(x, n);
-        n = wasm_v128_and(mask1, _mm_srli_epi64(n, 1));
+        n = _mm_and_si128(mask1, _mm_srli_epi64(n, 1));
         x = _mm_sub_epi8(x, n);
-        n = wasm_v128_and(mask1, _mm_srli_epi64(n, 1));
+        n = _mm_and_si128(mask1, _mm_srli_epi64(n, 1));
         x = _mm_sub_epi8(x, n);
         x = _mm_add_epi8(x, _mm_srli_epi16(x, 4));
-        x = wasm_v128_and(mask2, x);
-        x = wasm_i16x8_add(wasm_v128_and(x, mask3),
-                          wasm_v128_and(_mm_bsrli_si128(x, 1), mask3));
+        x = _mm_and_si128(mask2, x);
+        x = _mm_add_epi16(_mm_and_si128(x, mask3),
+                          _mm_and_si128(_mm_bsrli_si128(x, 1), mask3));
         return x;
 #endif
     }
 
     inline int Popcount() const {
 #if(defined __AVX512VPOPCNTDQ__ && defined __AVX512VL__)
-        v128_t counts = _mm_popcnt_epi64(vec);
+        __m128i counts = _mm_popcnt_epi64(vec);
         return _mm_cvtsi128_si64(counts) + _mm_cvtsi128_si64(_mm_unpackhi_epi64(counts, counts));
 #else
         // unpackhi_epi64+cvtsi128_si64 compiles to the same instructions as extract_epi64,
@@ -264,7 +263,7 @@ struct Bitvec08x16 {
 
     inline uint32_t MinPosGreaterThanOrEqual(uint16_t min_val) {
 #ifdef __SSE4_1__
-        return _mm_cvtsi128_si32(_mm_minpos_epu16(_mm_sub_epi16(vec, wasm_i16x8_splat(min_val))));
+        return _mm_cvtsi128_si32(_mm_minpos_epu16(_mm_sub_epi16(vec, _mm_set1_epi16(min_val))));
 #else
         uint32_t min = 0xffff;
         uint32_t pos = 0;
@@ -296,7 +295,7 @@ struct Bitvec08x16 {
 #else
         // we'll rely on the assumption that all requested shuffles are for epi16s so each
         // pair of requested bytes are always adjacent like 0x0302.
-        v128_t ctrl = control.vec & wasm_i16x8_splat(0xf);
+        __m128i ctrl = control.vec & _mm_set1_epi16(0xf);
 
         // replicate low 16 bits of each epi32 to the high 16
         Bitvec08x16 lo16s = vec & _mm_set1_epi32(0x0000ffff);
@@ -306,14 +305,14 @@ struct Bitvec08x16 {
         hi16s |= _mm_bsrli_si128(hi16s.vec, 2);
 
         Bitvec08x16 z{};
-        z |= _mm_shuffle_epi32(lo16s.vec, 0b00000000) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0x0));
-        z |= _mm_shuffle_epi32(hi16s.vec, 0b00000000) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0x2));
-        z |= _mm_shuffle_epi32(lo16s.vec, 0b01010101) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0x4));
-        z |= _mm_shuffle_epi32(hi16s.vec, 0b01010101) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0x6));
-        z |= _mm_shuffle_epi32(lo16s.vec, 0b10101010) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0x8));
-        z |= _mm_shuffle_epi32(hi16s.vec, 0b10101010) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0xa));
-        z |= _mm_shuffle_epi32(lo16s.vec, 0b11111111) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0xc));
-        z |= _mm_shuffle_epi32(hi16s.vec, 0b11111111) & wasm_i16x8_eq(ctrl, wasm_i16x8_splat(0xe));
+        z |= _mm_shuffle_epi32(lo16s.vec, 0b00000000) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0x0));
+        z |= _mm_shuffle_epi32(hi16s.vec, 0b00000000) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0x2));
+        z |= _mm_shuffle_epi32(lo16s.vec, 0b01010101) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0x4));
+        z |= _mm_shuffle_epi32(hi16s.vec, 0b01010101) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0x6));
+        z |= _mm_shuffle_epi32(lo16s.vec, 0b10101010) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0x8));
+        z |= _mm_shuffle_epi32(hi16s.vec, 0b10101010) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0xa));
+        z |= _mm_shuffle_epi32(lo16s.vec, 0b11111111) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0xc));
+        z |= _mm_shuffle_epi32(hi16s.vec, 0b11111111) & _mm_cmpeq_epi16(ctrl, _mm_set1_epi16(0xe));
         return z;
 #endif
     }
@@ -322,11 +321,11 @@ struct Bitvec08x16 {
 #ifdef __SSSE3__
         return Shuffle(consts.rotate_rows1);
 #else
-        v128_t mask1 = wasm_i16x8_make(0xffff, 0xffff, 0xffff, 0x0, 0xffff, 0xffff, 0xffff, 0x0);
-        v128_t mask2 = wasm_i16x8_make(0x0, 0x0, 0x0, 0xffff, 0x0, 0x0, 0x0, 0xffff);
+        __m128i mask1 = _mm_setr_epi16(0xffff, 0xffff, 0xffff, 0x0, 0xffff, 0xffff, 0xffff, 0x0);
+        __m128i mask2 = _mm_setr_epi16(0x0, 0x0, 0x0, 0xffff, 0x0, 0x0, 0x0, 0xffff);
         return _mm_or_si128(
-                wasm_v128_and(_mm_bsrli_si128(vec, 2), mask1),
-                wasm_v128_and(_mm_bslli_si128(vec, 6), mask2));
+                _mm_and_si128(_mm_bsrli_si128(vec, 2), mask1),
+                _mm_and_si128(_mm_bslli_si128(vec, 6), mask2));
 #endif
     }
 
@@ -334,11 +333,11 @@ struct Bitvec08x16 {
 #ifdef __SSSE3__
         return _mm_shuffle_epi32(vec, 0b10110001);
 #else
-        v128_t mask1 = wasm_i16x8_make(0xffff, 0xffff, 0x0, 0x0, 0xffff, 0xffff, 0x0, 0x0);
-        v128_t mask2 = wasm_i16x8_make(0x0, 0x0, 0xffff, 0xffff, 0x0, 0x0, 0xffff, 0xffff);
+        __m128i mask1 = _mm_setr_epi16(0xffff, 0xffff, 0x0, 0x0, 0xffff, 0xffff, 0x0, 0x0);
+        __m128i mask2 = _mm_setr_epi16(0x0, 0x0, 0xffff, 0xffff, 0x0, 0x0, 0xffff, 0xffff);
         return _mm_or_si128(
-                wasm_v128_and(_mm_bsrli_si128(vec, 4), mask1),
-                wasm_v128_and(_mm_bslli_si128(vec, 4), mask2));
+                _mm_and_si128(_mm_bsrli_si128(vec, 4), mask1),
+                _mm_and_si128(_mm_bslli_si128(vec, 4), mask2));
 #endif
     }
 
@@ -385,7 +384,7 @@ struct Bitvec08x16 {
     }
 
     inline Bitvec08x16 operator^(const Bitvec08x16 &other) const {
-        return wasm_v128_xor(vec, other.vec);
+        return _mm_xor_si128(vec, other.vec);
     }
 
     inline void operator^=(const Bitvec08x16 &other) {
@@ -393,7 +392,7 @@ struct Bitvec08x16 {
     }
 
     inline Bitvec08x16 operator&(const Bitvec08x16 &other) const {
-        return wasm_v128_and(vec, other.vec);
+        return _mm_and_si128(vec, other.vec);
     }
 
     inline void operator&=(const Bitvec08x16 &other) {
@@ -401,7 +400,7 @@ struct Bitvec08x16 {
     }
 
     inline Bitvec08x16 and_not(const Bitvec08x16 &other) const {
-        return wasm_v128_andnot(other.vec, vec);
+        return _mm_andnot_si128(other.vec, vec);
     };
 };
 
@@ -423,8 +422,8 @@ struct Bitvec16x16 {
                 uint16_t x04, uint16_t x05, uint16_t x06, uint16_t x07,
                 uint16_t x08, uint16_t x09, uint16_t x10, uint16_t x11,
                 uint16_t x12, uint16_t x13, uint16_t x14, uint16_t x15) noexcept :
-            lo_{wasm_i16x8_make(x00, x01, x02, x03, x04, x05, x06, x07)},
-            hi_{wasm_i16x8_make(x08, x09, x10, x11, x12, x13, x14, x15)} {}
+            lo_{_mm_setr_epi16(x00, x01, x02, x03, x04, x05, x06, x07)},
+            hi_{_mm_setr_epi16(x08, x09, x10, x11, x12, x13, x14, x15)} {}
 
     static inline Bitvec16x16 All(uint16_t value) {
         return Bitvec16x16{Bitvec08x16::All(value), Bitvec08x16::All(value)};
@@ -849,12 +848,12 @@ struct Bitvec16x16 {
 #endif // __AVX2__
 
 inline uint32_t WhichDots16(const char *x) {
-    const v128_t dots = _mm_set1_epi8('.');
-    const v128_t src = _mm_loadu_si128((const v128_t *) x);
+    const __m128i dots = _mm_set1_epi8('.');
+    const __m128i src = _mm_loadu_si128((const __m128i *) x);
 #if(defined __AVX512VL__ && defined __AVX512BW__)
     return ((uint32_t) _mm_cmpeq_epi8_mask(src, dots));
 #else
-    return ((uint32_t) wasm_i8x16_bitmask(_mm_cmpeq_epi8(src, dots)));
+    return ((uint32_t) _mm_movemask_epi8(_mm_cmpeq_epi8(src, dots)));
 #endif
 }
 
