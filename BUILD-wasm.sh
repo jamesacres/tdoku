@@ -11,7 +11,6 @@ mkdir -p build
     cd build
     rm -f CMakeCache.txt
     rm -rf CMakeFiles
-    emcmake cmake .. $*
-    #make ${target}
+    emcmake cmake -DWASM=ON .. $*
     emmake make ${target}
 )
