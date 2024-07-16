@@ -8,10 +8,6 @@
   </head>
 
   <body>
-    <script>
-      const setOutput = (output) => alert(output);
-      Module = { print: function () { return (...t) => { var n = t.join(" "); setOutput(n) } }(), canvas: (() => { })(), setStatus: e => { if (Module.setStatus.last || (Module.setStatus.last = { time: Date.now(), text: "" }), e !== Module.setStatus.last.text) { var t = e.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/), n = Date.now(); t && n - Module.setStatus.last.time < 30 || (Module.setStatus.last.time = n, Module.setStatus.last.text = e, t ? (e = t[1]) : (e)) } }, totalDependencies: 0, monitorRunDependencies: e => { this.totalDependencies = Math.max(this.totalDependencies, e), Module.setStatus(e ? "Preparing... (" + (this.totalDependencies - e) + "/" + this.totalDependencies + ")" : "All downloads complete.") } }; Module.setStatus("Downloading..."), window.onerror = e => { Module.setStatus("Exception thrown, see JavaScript console"), Module.setStatus = e => { e && console.error("[post-exception status] " + e) } }
-    </script>
     <script src=solve.js></script>
     <script>
       Module.onRuntimeInitialized = function () {
